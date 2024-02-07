@@ -123,6 +123,110 @@ let findWireSymbolIntersections (model: Model) (wire: Wire) : BoundingBox list =
     |> List.collect (fun (i, (startPos, endPos)) -> boxesIntersectedBySegment (i > List.length segVertices - 2 && inputIsSelect) startPos endPos)
     |> List.distinct
 
+//------------------------------------------------------------------------//
+//--------------------------Shifting 2D Segment---------------------------//
+//------------------------------------------------------------------------//
+
+/// <summary>Helper function to update the length of a specific segment by a differential.</summary>
+/// <param name="segIndex">Index of the segment.</param>
+/// <param name="lengthChange">Amount of length change applied to the segment.</param>
+/// <param name="segments">List of segments to apply the change to.</param>
+let updateSegment (segIndex: int) (lengthChange: float) (segments: Segment list) =
+    List.updateAt segIndex { segments[segIndex] with Length = segments[segIndex].Length + lengthChange } segments
+
+/// <summary>Main function to try to shift 2 neighboring segments in the bottom-right direction.</summary>
+/// <param name="model">Sheet model, used to check if shifted wires collides with a symbol.</param>
+/// <param name="intersectedBoxes">Previously identified collision symbols, used to find the shift amount.</param>
+/// <param name="wire">Target wire to shift.</param>
+/// <remarks>Function can be parameterized much better, but copied and hardcoded due to lack of time.</remarks>
+let tryShift2DSegBottomRight (model: Model) (intersectedBoxes: BoundingBox list) (wire: Wire): Wire option =
+    let shiftMinLength = // if it is suck behind a symbol, need to at least shift by the max of a bounding box
+        intersectedBoxes
+        |> List.map (fun box -> [box.W; box.H])
+        |> List.fold (fun prev curr -> prev @ curr) []
+        |> List.max
+
+    let shiftIndexes = // search for specific pattern to fix, in this case this is the bottom right segment
+        let patternMatcher (segLengths: List<float>) (startIndex: int) = 
+            match startIndex with
+            | si when (si > (List.length segLengths)-3) -> -1
+            | si -> 
+                if segLengths[si] >= 0 && segLengths[si+1] >= 0 && segLengths[si+2] <= 0 && segLengths[si+3] >= 0
+                then si else -1
+
+        let segLengths = wire.Segments |> List.map (fun seg -> seg.Length)
+        
+        [0..List.length segLengths]
+        |> List.map (patternMatcher segLengths)
+        |> List.filter (fun i -> i > 0)
+
+    let shift2DSeg (amountToShift: float) (startSeg: int) = // actual shift function
+        let newSegments = 
+            wire.Segments
+            |> updateSegment startSeg amountToShift
+            |> updateSegment (startSeg+1) amountToShift
+            |> updateSegment (startSeg+2) -amountToShift
+            |> updateSegment (startSeg+3) -amountToShift
+
+        { wire with Segments = newSegments }
+    
+    let checkShiftResult (shiftedWire: Wire): Option<Wire> = // check whether the shift result improve overlap
+        match findWireSymbolIntersections model shiftedWire with
+        | [] -> Some shiftedWire
+        | _ -> None
+    
+    shiftIndexes
+    |> List.map (shift2DSeg shiftMinLength)
+    |> List.map (checkShiftResult)
+    |> List.tryFind (fun res -> match res with | None -> false | _ -> true)
+    |> Option.defaultValue (None)
+
+/// <summary>Main function to try to shift 2 neighboring segments in the bottom-left direction.</summary>
+/// <param name="model">Sheet model, used to check if shifted wires collides with a symbol.</param>
+/// <param name="intersectedBoxes">Previously identified collision symbols, used to find the shift amount.</param>
+/// <param name="wire">Target wire to shift.</param>
+/// <remarks>Function can be parameterized much better, but copied and hardcoded due to lack of time.</remarks>
+let tryShift2DSegBottomLeft (model: Model) (intersectedBoxes: BoundingBox list) (wire: Wire): Wire option =
+    let shiftMinLength = // if it is suck behind a symbol, need to at least shift by the max of a bounding box
+        intersectedBoxes
+        |> List.map (fun box -> [box.W; box.H])
+        |> List.fold (fun prev curr -> prev @ curr) []
+        |> List.max
+
+    let shiftIndexes = // search for specific pattern to fix, in this case this is the bottom right segment
+        let patternMatcher (segLengths: List<float>) (startIndex: int) = 
+            match startIndex with
+            | si when (si > (List.length segLengths)-3) -> -1
+            | si -> 
+                if segLengths[si] <= 0 && segLengths[si+1] <= 0 && segLengths[si+2] <= 0 && segLengths[si+3] >= 0
+                then si else -1
+
+        let segLengths = wire.Segments |> List.map (fun seg -> seg.Length)
+        
+        [0..List.length segLengths]
+        |> List.map (patternMatcher segLengths)
+        |> List.filter (fun i -> i > 0)
+
+    let shift2DSeg (amountToShift: float) (startSeg: int) = // actual shift function
+        let newSegments = 
+            wire.Segments
+            |> updateSegment startSeg amountToShift
+            |> updateSegment (startSeg+1) -amountToShift
+            |> updateSegment (startSeg+2) -amountToShift
+            |> updateSegment (startSeg+3) amountToShift
+
+        { wire with Segments = newSegments }
+    
+    let checkShiftResult (shiftedWire: Wire): Option<Wire> = // check whether the shift result improve overlap
+        match findWireSymbolIntersections model shiftedWire with
+        | [] -> Some shiftedWire
+        | _ -> None
+    
+    shiftIndexes
+    |> List.map (shift2DSeg shiftMinLength)
+    |> List.map (checkShiftResult)
+    |> List.tryFind (fun res -> match res with | None -> false | _ -> true)
+    |> Option.defaultValue (None)
 
 //------------------------------------------------------------------------//
 //--------------------------Shifting Vertical Segment---------------------//
@@ -503,12 +607,10 @@ let smartAutoroute (model: Model) (wire: Wire) : Wire =
     | 0 -> snappedToNetWire
     | _ ->
         tryShiftVerticalSeg model intersectedBoxes snappedToNetWire
-        |> Option.orElse (
-            tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire
-        )
+        |> Option.orElse (tryShiftHorizontalSeg maxCallsToShiftHorizontalSeg model intersectedBoxes snappedToNetWire)
+        |> Option.orElse (tryShift2DSegBottomRight model intersectedBoxes snappedToNetWire) // tick3: check for shift bottom right
+        |> Option.orElse (tryShift2DSegBottomLeft model intersectedBoxes snappedToNetWire) // tick3: check for shift bottom left
         |> Option.defaultValue snappedToNetWire
-   
-
 
 //-----------------------------------------------------------------------------------------------------------//
 //---------------------------------------------Top-level Wire Routing Functions------------------------------//
