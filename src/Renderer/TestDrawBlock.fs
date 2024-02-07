@@ -173,13 +173,6 @@ module HLPTick3 =
 //------------------------------------------------------------------------------------------------------------------------//
     module Builder =
 
-
-                
-
-            
-
-
-
         /// Place a new symbol with label symLabel onto the Sheet with given position.
         /// Return error if symLabel is not unique on sheet, or if position is outside allowed sheet coordinates (0 - maxSheetCoord).
         /// To be safe place components close to (maxSheetCoord/2.0, maxSheetCoord/2.0).
@@ -199,10 +192,7 @@ module HLPTick3 =
                 |> Optic.set symbolModel_ symModel
                 |> SheetUpdate.updateBoundingBoxes // could optimise this by only updating symId bounding boxes
                 |> Ok
-        
 
-
-    
         /// Place a new symbol onto the Sheet with given position and scaling (use default scale if this is not specified).
         /// The ports on the new symbol will be determined by the input and output components on some existing sheet in project.
         /// Return error if symLabel is not unique on sheet, or ccSheetName is not the name of some other sheet in project.
@@ -232,16 +222,90 @@ module HLPTick3 =
                         Description = None
                     }
                 placeSymbol symLabel (Custom ccType) position model
-            
+
+        /// <summary>Helper function to get symbol ID from symbol label and symbol model.</summary>
+        /// <param name="symLabel">Label of symbol to find.</param>
+        /// <param name="symModel">Symbol model to search in.</param>
+        /// <remarks>(Not sure whether this is the correct place for this.)</remarks>
+        let getSymId (symLabel: string) (symModel: SymbolT.Model): ComponentId = 
+            mapValues symModel.Symbols
+            |> Array.tryFind (fun sym -> caseInvariantEqual sym.Component.Label symLabel)
+            |> function
+                | Some x -> x.Id
+                | _ -> failwithf "TestDrawBlock.rotateSymbol: symLabel (%A) not found" symLabel
+
+        /// <summary>Helper function to re-route all wires on the sheet.</summary>
+        /// <param name="sheetModel">Sheet model to reroute.</param>
+        /// <remarks>(Not sure whether this is the correct place for this.)</remarks>
+        let autoRouteAllWires (sheetModel: SheetT.Model): SheetT.Model =
+            let wireModel = Optic.get busWireModel_ sheetModel
+            let wireIds =
+                wireModel.Wires
+                |> Map.fold (fun keys wireId _ -> keys @ [wireId]) []
+            let updateFolder prevWireModel wireId =
+                let updatedWire = BusWireRoute.smartAutoroute prevWireModel prevWireModel.Wires[wireId]
+                let updatedWires = Map.add wireId updatedWire prevWireModel.Wires
+                {prevWireModel with Wires=updatedWires}
+            let updatedWireModel = 
+                (wireModel, wireIds)
+                ||> List.fold updateFolder
+            Optic.set busWireModel_ updatedWireModel sheetModel
         
+        /// <summary>Rotate anti-clockwise a symbol on the sheet model by an arbitrary 
+        /// degree (either 0, 90, 180, 270).</summary>
+        /// <param name="symLabel">Label of symbol to rotate, different from ID.</param>
+        /// <param name="rotate">Anti-clockwise degrees of rotation, of type Rotation.</param>
+        /// <param name="model">Pre-rotation sheet model.</param>
+        /// <returns>An updated sheet model with the rotation.</returns>
+        /// <remarks>This is terrible code, but it is necessary as we need to compensate for 
+        /// the fact that SymbolResizeHelpers.rotateSymbol does not work for 0 or 180 degrees.
+        /// Recursion could be used here, but that would not make the code more readable.</remarks>
+        let rotateSymbol (symLabel: string) (rotate: Rotation) (model: SheetT.Model) : (SheetT.Model) =  
+            let rotateAntiClockwiseBy90 (model: SheetT.Model): SheetT.Model=
+                let symModel = Optic.get symbolModel_ model
+                let symId = getSymId symLabel symModel
+                let updatedSymModel = 
+                    SymbolUpdate.updateSymbol (SymbolResizeHelpers.rotateSymbol Degree90) (symId) (Optic.get symbolModel_ model)
+                Optic.set symbolModel_ updatedSymModel model
 
-        // Rotate a symbol
-        let rotateSymbol (symLabel: string) (rotate: Rotation) (model: SheetT.Model) : (SheetT.Model) =
-            failwithf "Not Implemented"
+            match rotate with 
+            | Degree0 -> model
+            | Degree90 -> model |> rotateAntiClockwiseBy90
+            | Degree180 -> model |> rotateAntiClockwiseBy90 |> rotateAntiClockwiseBy90
+            | Degree270 -> model |> rotateAntiClockwiseBy90 |> rotateAntiClockwiseBy90 |> rotateAntiClockwiseBy90
+            | _ -> failwithf "TestDrawBlock.rotateSymbol: Rotation type not matched (should not happen)"
+            |> autoRouteAllWires
 
-        // Flip a symbol
+        /// <summary>Flip a symbol either horizontally or vertically.</summary>
+        /// <param name="symLabel">Label of symbol to flip, different from ID.</param>
+        /// <param name="flip">Horizontal or vertical, of type SymbolT.FlipType.</param>
+        /// <param name="model">Pre-flip sheet model.</param>
+        /// <returns>An updated sheet model with the flip.</returns>
         let flipSymbol (symLabel: string) (flip: SymbolT.FlipType) (model: SheetT.Model) : (SheetT.Model) =
-            failwithf "Not Implemented"
+            let rotateAntiClockwiseBy90 (model: SheetT.Model): SheetT.Model =
+                let symModel = 
+                    Optic.get symbolModel_ model
+                let symId = 
+                    getSymId symLabel symModel
+                let updatedSymModel = 
+                    SymbolUpdate.updateSymbol (SymbolResizeHelpers.rotateSymbol Degree90) (symId) (Optic.get symbolModel_ model)
+
+                Optic.set symbolModel_ updatedSymModel model
+
+            let flipHorizontal (model: SheetT.Model): SheetT.Model =
+                let symModel = 
+                    Optic.get symbolModel_ model
+                let symId = 
+                    getSymId symLabel symModel
+                let updatedSymModel = 
+                    SymbolUpdate.updateSymbol (SymbolResizeHelpers.flipSymbol SymbolT.FlipHorizontal) (symId) (symModel)
+
+                Optic.set symbolModel_ updatedSymModel model
+            
+            match flip with
+            | SymbolT.FlipHorizontal -> model |> flipHorizontal
+            | SymbolT.FlipVertical -> model |> flipHorizontal |> rotateAntiClockwiseBy90 |> rotateAntiClockwiseBy90
+            |> autoRouteAllWires
 
         /// Add a (newly routed) wire, source specifies the Output port, target the Input port.
         /// Return an error if either of the two ports specified is invalid, or if the wire duplicates and existing one.
@@ -329,6 +393,41 @@ module HLPTick3 =
         fromList [-100..20..100]
         |> map (fun n -> middleOfSheet + {X=float n; Y=0.})
 
+    /// <summary>Sample data based on a square grid of equidistant rows and columns.</summary>
+    /// <param name="step">Steps between rows and columns.</param>
+    let squareGridPositions (step: int) =
+        fromList [-100..step..100]
+        |> (fun g -> g, g) // duplicate Gen<XYPos> record to pass into GenerateData.product
+        ||> GenerateData.product (fun x y -> x, y)
+        |> map (fun (dx, dy) -> middleOfSheet + {X=float dx; Y=float dy})
+
+    /// <summary>Generate list of random orientations for the AND gate.</summary>
+    let randomOrientations (sampleSize: int) =
+        let intToRotate (input: int): Option<Rotation> =
+            match input with 
+            | input when input % 5 = 0 -> Some Degree0
+            | input when input % 5 = 1 -> Some Degree90
+            | input when input % 5 = 2 -> Some Degree180
+            | input when input % 5 = 3 -> Some Degree270
+            | input when input % 5 = 4 -> None
+            | _ -> failwithf "randomOrientations: intToRotate: input not matched (not supposed to happen)"
+
+        let intToFlip (input: int): Option<SymbolT.FlipType> =
+            match input with 
+            | input when input % 3 = 0 -> Some SymbolT.FlipHorizontal
+            | input when input % 3 = 1 -> Some SymbolT.FlipVertical
+            | input when input % 3 = 2 -> None
+            | _ -> failwithf "randomOrientations: intToRotate: input not matched (not supposed to happen)"
+        
+        let andRotations = randomInt 1 1 sampleSize |> map intToRotate
+        let andFlips = randomInt 1 1 sampleSize |> map intToFlip
+
+        let andXPos = randomInt -100 1 100 |> truncate sampleSize
+        let andYPos = randomInt -100 1 100 |> truncate sampleSize
+        let andPos = (andXPos, andYPos) ||> map2 (fun dx dy -> middleOfSheet + {X=float dx; Y=float dy})
+        
+        map3 (fun rotation flip pos -> rotation, flip, pos) andRotations andFlips andPos
+
     /// demo test circuit consisting of a DFF & And gate
     let makeTest1Circuit (andPos:XYPos) =
         initSheetModel
@@ -338,6 +437,32 @@ module HLPTick3 =
         |> Result.bind (placeWire (portOf "FF1" 0) (portOf "G1" 0) )
         |> getOkOrFail
 
+    /// <summary>Create demo circuit consisting of DFF and AND gate, with arbirtary
+    /// positioning of AND gate rotation, flip, and position</summary>
+    /// <param name="andRotate">AND gate rotate option, will not rotate if passed in None.</param>
+    /// <param name="andFlip">AND gate flip option, will not flip if passed in None.</param>
+    /// <param name="andPos">Position of the AND gate.</param>
+    let makeDemoCircuit (andRotate: Option<Rotation>, andFlip: Option<SymbolT.FlipType>, andPos:XYPos) =
+        let applyRotate (andRotate: Option<Rotation>) (sheetModel: SheetT.Model): Result<SheetT.Model,string> = 
+            match andRotate with
+            | None -> Ok sheetModel
+            | Some rotate -> Ok (rotateSymbol "G1" rotate sheetModel)
+            | _ -> failwithf "makeTestXCircuit: andRotate option not matched (not supposed to happen)"
+
+        let applyFlip (andFlip: Option<SymbolT.FlipType>) (sheetModel: SheetT.Model): Result<SheetT.Model,string> = 
+            match andFlip with
+            | None -> Ok sheetModel
+            | Some flip -> Ok (flipSymbol "G1" flip sheetModel)
+            | _ -> failwithf "makeTestXCircuit: andFlip option not matched (not supposed to happen)"
+
+        initSheetModel
+        |> placeSymbol "G1" (GateN(And,2)) andPos
+        |> Result.bind (placeSymbol "FF1" DFF middleOfSheet)
+        |> Result.bind (placeWire (portOf "G1" 0) (portOf "FF1" 0))
+        |> Result.bind (placeWire (portOf "FF1" 0) (portOf "G1" 0) )
+        |> Result.bind (applyRotate andRotate)
+        |> Result.bind (applyFlip andFlip)
+        |> getOkOrFail
 
 
 //------------------------------------------------------------------------------------------------//
@@ -445,6 +570,75 @@ module HLPTick3 =
                 Asserts.failOnAllTests
                 dispatch
             |> recordPositionInTest testNum dispatch
+        
+        /// <summary>[Tick3 Step7] Test 5: Square-grid positioned AND + DFF (20px step), 
+        /// fail all tests. Useful for displaying all grid.</summary>
+        let test5 testNum firstSample dispatch =
+            runTestOnSheets
+                "Test 5: Square-grid positioned AND + DFF (20px step), fail all tests."
+                firstSample
+                (squareGridPositions 20)
+                makeTest1Circuit
+                Asserts.failOnAllTests
+                dispatch
+            |> recordPositionInTest testNum dispatch
+
+        /// <summary>[Tick3 Step7] Test 6: Square-grid positioned AND + DFF without symbol 
+        /// collision (10px step), fail on wire intersect. Useful for displaying faults
+        /// in auto-routing.</summary>
+        /// <remarks>Could possibly be done in more abstracted manner. Code taken from previous
+        /// Assertion module to save time.</remarks>
+        let test6 testNum firstSample dispatch =
+            let filterSymbolCollisionFromPosition (pos: XYPos): bool =
+                let sheet = makeTest1Circuit pos
+                let boxes = mapValues sheet.BoundingBoxes |> Array.toList |> List.mapi (fun n box -> n,box)
+                List.allPairs boxes boxes 
+                |> List.exists (fun ((n1,box1),(n2,box2)) -> (n1 <> n2) && BlockHelpers.overlap2DBox box1 box2)
+                |> (fun x -> not x) // keep if no intersection
+
+            runTestOnSheets
+                "Test 6: Square-grid positioned AND + DFF without symbol collision (10px step), fail on wire intersect."
+                firstSample
+                (GenerateData.filter filterSymbolCollisionFromPosition (squareGridPositions 10))
+                makeTest1Circuit
+                Asserts.failOnWireIntersectsSymbol
+                dispatch
+            |> recordPositionInTest testNum dispatch
+
+        /// <summary>[Tick3 Step10] Test 7: Randomly positioned and oriented AND + DFF,
+        /// fails on all tests. Total of 100 samples. Useful for demonstrating working 
+        /// randomness and arbitrary orientation.</summary>
+        let test7 testNum firstSample dispatch =
+            runTestOnSheets
+                "Test 7: Randomly positioned and oriented AND + DFF, fails on all tests."
+                firstSample
+                (randomOrientations 100)
+                makeDemoCircuit
+                Asserts.failOnAllTests
+                dispatch
+            |> recordPositionInTest testNum dispatch
+
+        /// <summary>[Tick3 Step10] Test 8: Randomly positioned and oriented AND + DFF
+        /// without symbol collisions, fails on wire collision. Total of 100 samples. 
+        /// Useful for demonstrating faults in auto-routing.</summary>
+        /// <remarks>Could possibly be done in more abstracted manner. Code taken from previous
+        /// Assertion module to save time.</remarks>
+        let test8 testNum firstSample dispatch =
+            let filterSymbolCollisionFromOrientation (_, _, pos: XYPos): bool =
+                let sheet = makeTest1Circuit pos
+                let boxes = mapValues sheet.BoundingBoxes |> Array.toList |> List.mapi (fun n box -> n,box)
+                List.allPairs boxes boxes 
+                |> List.exists (fun ((n1,box1),(n2,box2)) -> (n1 <> n2) && BlockHelpers.overlap2DBox box1 box2)
+                |> (fun x -> not x) // keep if no intersection
+            
+            runTestOnSheets
+                "Test 8: Randomly positioned and oriented AND + DFF without symbol collisions, fails on wire collision."
+                firstSample
+                (GenerateData.filter filterSymbolCollisionFromOrientation (randomOrientations 100))
+                makeDemoCircuit
+                Asserts.failOnWireIntersectsSymbol
+                dispatch
+            |> recordPositionInTest testNum dispatch
 
         /// List of tests available which can be run ftom Issie File Menu.
         /// The first 9 tests can also be run via Ctrl-n accelerator keys as shown on menu
@@ -452,16 +646,15 @@ module HLPTick3 =
             // Change names and test functions as required
             // delete unused tests from list
             [
-                "Test1", test1 // example
-                "Test2", test2 // example
-                "Test3", test3 // example
-                "Test4", test4 
-                "Test5", fun _ _ _ -> printf "Test5" // dummy test - delete line or replace by real test as needed
-                "Test6", fun _ _ _ -> printf "Test6"
-                "Test7", fun _ _ _ -> printf "Test7"
-                "Test8", fun _ _ _ -> printf "Test8"
+                "Test1", test1 // example: horiz
+                "Test2", test2 // example: horiz
+                "Test3", test3 // example: horiz
+                "Test4", test4 // example: horiz
+                "Test5", test5 // tick 3 step 7: fail on all tests and display grid
+                "Test6", test6 // tick 3 step 7: filter symbol collision and fail on wire interesect
+                "Test7", test7 // tick 3 step 10: fail on all tests and display random orientation
+                "Test8", test8 // tick 3 step 10: filter symbol collision and fail on wire interesect
                 "Next Test Error", fun _ _ _ -> printf "Next Error:" // Go to the nexterror in a test
-
             ]
 
         /// Display the next error in a previously started test
@@ -485,9 +678,3 @@ module HLPTick3 =
                 ()
             | _ ->
                 func testIndex 0 dispatch
-        
-
-
-    
-
-
