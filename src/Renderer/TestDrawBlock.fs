@@ -226,6 +226,7 @@ module HLPTick3 =
         /// <summary>Helper function to get symbol ID from symbol label and symbol model.</summary>
         /// <param name="symLabel">Label of symbol to find.</param>
         /// <param name="symModel">Symbol model to search in.</param>
+        /// <returns>ComponentId of symbol specified by symLabel.</returns>
         /// <remarks>(Not sure whether this is the correct place for this.)</remarks>
         let getSymId (symLabel: string) (symModel: SymbolT.Model): ComponentId = 
             mapValues symModel.Symbols
@@ -236,6 +237,7 @@ module HLPTick3 =
 
         /// <summary>Helper function to re-route all wires on the sheet.</summary>
         /// <param name="sheetModel">Sheet model to reroute.</param>
+        /// <returns>Updated sheet model.</returns>
         /// <remarks>(Not sure whether this is the correct place for this.)</remarks>
         let autoRouteAllWires (sheetModel: SheetT.Model): SheetT.Model =
             let wireModel = Optic.get busWireModel_ sheetModel
@@ -256,7 +258,7 @@ module HLPTick3 =
         /// <param name="symLabel">Label of symbol to rotate, different from ID.</param>
         /// <param name="rotate">Anti-clockwise degrees of rotation, of type Rotation.</param>
         /// <param name="model">Pre-rotation sheet model.</param>
-        /// <returns>An updated sheet model with the rotation.</returns>
+        /// <returns>Updated sheet model with the rotation.</returns>
         /// <remarks>This is terrible code, but it is necessary as we need to compensate for 
         /// the fact that SymbolResizeHelpers.rotateSymbol does not work for 0 or 180 degrees.
         /// Recursion could be used here, but that would not make the code more readable.</remarks>
@@ -395,6 +397,7 @@ module HLPTick3 =
 
     /// <summary>Sample data based on a square grid of equidistant rows and columns.</summary>
     /// <param name="step">Steps between rows and columns.</param>
+    /// <returns>Returns a GeneratedData record of XYPos.</returns>
     let squareGridPositions (step: int) =
         fromList [-100..step..100]
         |> (fun g -> g, g) // duplicate Gen<XYPos> record to pass into GenerateData.product
@@ -402,6 +405,8 @@ module HLPTick3 =
         |> map (fun (dx, dy) -> middleOfSheet + {X=float dx; Y=float dy})
 
     /// <summary>Generate list of random orientations for the AND gate.</summary>
+    /// <param name="sampleSize">Given size of sample data to be generated.</param>
+    /// <returns>Returns a GeneratedData record of Flip, Rotation, and XYPos.</returns>
     let randomOrientations (sampleSize: int) =
         let intToRotate (input: int): Option<Rotation> =
             match input with 
@@ -442,18 +447,19 @@ module HLPTick3 =
     /// <param name="andRotate">AND gate rotate option, will not rotate if passed in None.</param>
     /// <param name="andFlip">AND gate flip option, will not flip if passed in None.</param>
     /// <param name="andPos">Position of the AND gate.</param>
+    /// <returns>Updated sheet model.</returns>
     let makeDemoCircuit (andRotate: Option<Rotation>, andFlip: Option<SymbolT.FlipType>, andPos:XYPos) =
         let applyRotate (andRotate: Option<Rotation>) (sheetModel: SheetT.Model): Result<SheetT.Model,string> = 
             match andRotate with
             | None -> Ok sheetModel
             | Some rotate -> Ok (rotateSymbol "G1" rotate sheetModel)
-            | _ -> failwithf "makeTestXCircuit: andRotate option not matched (not supposed to happen)"
+            | _ -> failwithf "makeDemoCircuit: andRotate option not matched (not supposed to happen)"
 
         let applyFlip (andFlip: Option<SymbolT.FlipType>) (sheetModel: SheetT.Model): Result<SheetT.Model,string> = 
             match andFlip with
             | None -> Ok sheetModel
             | Some flip -> Ok (flipSymbol "G1" flip sheetModel)
-            | _ -> failwithf "makeTestXCircuit: andFlip option not matched (not supposed to happen)"
+            | _ -> failwithf "makeDemoCircuit: andFlip option not matched (not supposed to happen)"
 
         initSheetModel
         |> placeSymbol "G1" (GateN(And,2)) andPos
@@ -620,7 +626,7 @@ module HLPTick3 =
 
         /// <summary>[Tick3 Step10] Test 8: Randomly positioned and oriented AND + DFF
         /// without symbol collisions, fails on wire collision. Total of 100 samples. 
-        /// Useful for demonstrating faults in auto-routing.</summary>
+        /// Useful for displaying faults in auto-routing.</summary>
         /// <remarks>Could possibly be done in more abstracted manner. Code taken from previous
         /// Assertion module to save time.</remarks>
         let test8 testNum firstSample dispatch =
