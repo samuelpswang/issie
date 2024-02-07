@@ -577,13 +577,13 @@ module HLPTick3 =
                 dispatch
             |> recordPositionInTest testNum dispatch
         
-        /// <summary>[Tick3 Step7] Test 5: Square-grid positioned AND + DFF (20px step), 
+        /// <summary>[Tick3 Step7] Test 5: Square-grid positioned AND + DFF (10px step), 
         /// fail all tests. Useful for displaying all grid.</summary>
         let test5 testNum firstSample dispatch =
             runTestOnSheets
-                "Test 5: Square-grid positioned AND + DFF (20px step), fail all tests."
+                "Square-grid positioned AND + DFF (10px step): fail all tests"
                 firstSample
-                (squareGridPositions 20)
+                (squareGridPositions 10)
                 makeTest1Circuit
                 Asserts.failOnAllTests
                 dispatch
@@ -603,7 +603,7 @@ module HLPTick3 =
                 |> (fun x -> not x) // keep if no intersection
 
             runTestOnSheets
-                "Test 6: Square-grid positioned AND + DFF without symbol collision (10px step), fail on wire intersect."
+                "Square-grid positioned AND + DFF without symbol collision (10px step): fail on wire intersect"
                 firstSample
                 (GenerateData.filter filterSymbolCollisionFromPosition (squareGridPositions 10))
                 makeTest1Circuit
@@ -616,7 +616,7 @@ module HLPTick3 =
         /// randomness and arbitrary orientation.</summary>
         let test7 testNum firstSample dispatch =
             runTestOnSheets
-                "Test 7: Randomly positioned and oriented AND + DFF, fails on all tests."
+                "Randomly positioned and oriented AND + DFF: fails on all tests"
                 firstSample
                 (randomOrientations 100)
                 makeDemoCircuit
@@ -638,7 +638,7 @@ module HLPTick3 =
                 |> (fun x -> not x) // keep if no intersection
             
             runTestOnSheets
-                "Test 8: Randomly positioned and oriented AND + DFF without symbol collisions, fails on wire collision."
+                "Randomly positioned and oriented AND + DFF without symbol collisions: fails on wire collision"
                 firstSample
                 (GenerateData.filter filterSymbolCollisionFromOrientation (randomOrientations 100))
                 makeDemoCircuit

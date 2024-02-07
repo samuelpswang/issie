@@ -149,14 +149,14 @@ let tryShift2DSegBottomRight (model: Model) (intersectedBoxes: BoundingBox list)
     let shiftIndexes = // search for specific pattern to fix, in this case this is the bottom right segment
         let patternMatcher (segLengths: List<float>) (startIndex: int) = 
             match startIndex with
-            | si when (si > (List.length segLengths)-3) -> -1
+            | si when (si > ((List.length segLengths)-4)) -> -1
             | si -> 
                 if segLengths[si] >= 0 && segLengths[si+1] >= 0 && segLengths[si+2] <= 0 && segLengths[si+3] >= 0
                 then si else -1
 
         let segLengths = wire.Segments |> List.map (fun seg -> seg.Length)
         
-        [0..List.length segLengths]
+        [0..(List.length segLengths)-1]
         |> List.map (patternMatcher segLengths)
         |> List.filter (fun i -> i > 0)
 
@@ -196,14 +196,14 @@ let tryShift2DSegBottomLeft (model: Model) (intersectedBoxes: BoundingBox list) 
     let shiftIndexes = // search for specific pattern to fix, in this case this is the bottom right segment
         let patternMatcher (segLengths: List<float>) (startIndex: int) = 
             match startIndex with
-            | si when (si > (List.length segLengths)-3) -> -1
+            | si when (si > (List.length segLengths)-4) -> -1
             | si -> 
                 if segLengths[si] <= 0 && segLengths[si+1] <= 0 && segLengths[si+2] <= 0 && segLengths[si+3] >= 0
                 then si else -1
 
         let segLengths = wire.Segments |> List.map (fun seg -> seg.Length)
         
-        [0..List.length segLengths]
+        [0..(List.length segLengths)-1]
         |> List.map (patternMatcher segLengths)
         |> List.filter (fun i -> i > 0)
 
